@@ -1,0 +1,193 @@
+body {
+    background-color: #FAF7F2;
+    /* background-image: url('media/carpet.jpg'); */
+    color: #2C2520;
+    background-image: radial-gradient(rgba(197, 160, 89, 0.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #FAF7F2;
+}
+::-webkit-scrollbar-thumb {
+    background: #C5A059;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #0F4C3A;
+}
+.islamic-border {
+    border-image: linear-gradient(to bottom, #C5A059, #0F4C3A) 1;
+}
+.gold-glow:hover {
+    box-shadow: 0 0 15px rgba(197, 160, 89, 0.4);
+}
+.hero-medallion-wrapper {
+            display: flex;
+            justify-content: center;
+        }
+
+        @media (min-width: 768px) {
+            .hero-medallion-wrapper {
+                width: 33.333333%;
+            }
+        }
+
+        .islamic-medallion-img-container {
+            width: 12rem;
+            height: 12rem;
+            border-radius: 50%;
+            border: 4px double rgba(197, 160, 89, 0.7); 
+            overflow: hidden; 
+            box-shadow: var(--shadow-xl); 
+            background-color: var(--color-green);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .medallion-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; 
+            display: block;
+        }
+
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+.filter-btn {
+    transition: all 0.3s ease;
+    border: 1px solid #E5C173;
+    background-color: white;
+}
+
+.filter-btn.active {
+    background-color: #0F4C3A !important; 
+    color: #ffffff !important;        
+    border-color: #0F4C3A !important;
+}
+body.dark-theme {
+    background-color: #121212 !important;
+    color: #e5e7eb !important;
+}
+
+[class*="border"] {
+    border-color: #ead5ae ;
+}
+
+
+body.dark-theme .bg-white,
+body.dark-theme .bg-madinah-cream,
+body.dark-theme .chapters-header-card,
+body.dark-theme .hadiths-nav-card,
+body.dark-theme .search-filters-card {
+    background-color: #1e1e1e !important;
+    border-color: #2d2d2d !important;
+    color: #f3f4f6 !important;
+}
+
+body.dark-theme .text-madinah-dark,
+body.dark-theme h2, body.dark-theme h3, body.dark-theme h4 {
+    color: #f3f4f6 !important;
+}
+
+body.dark-theme .text-madinah-green {
+    color: #34d399 !important; 
+}
+
+body.dark-theme header,
+body.dark-theme footer {
+    background-color: #0a261e !important;
+    border-color: #c5a059 !important;
+}
+
+body.dark-theme input {
+    background-color: #2d2d2d !important;
+    border-color: #404040 !important;
+    color: #ffffff !important;
+}
+
+body.dark-theme img {
+    filter: brightness(0.75) contrast(1.1);
+}
+#filter-global-books option {
+    background-color: #FBF9F4 !important; 
+    color: #2D3748 !important;    
+}
+
+#filter-global-books option:checked {
+    background: #C5A059 linear-gradient(0deg, #C5A059 0%, #C5A059 100%) !important;
+    box-shadow: 0 0 10px #C5A059 inset !important;
+    color: #FFFFFF !important;
+}
+
+#filter-global-books:focus option:checked {
+    background: #C5A059 linear-gradient(0deg, #C5A059 0%, #C5A059 100%) !important;
+    box-shadow: 0 0 10px #C5A059 inset !important;
+    color: #FFFFFF !important;
+}
+
+body.dark-theme #screen-welcome .grid > div .w-12.h-12 {
+    background-color: #C5A059 !important; 
+    border-radius: 50% !important;        
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 8px !important;             
+    transition: none !important;    
+}
+
+body.dark-theme #screen-welcome .grid > div:hover .w-12.h-12 {
+    background-color: #C5A059 !important;
+}
+
+body.dark-theme #screen-welcome .grid > div .w-12.h-12 img {
+    filter: brightness(0) invert(1) !important; 
+    width: 22px !important;
+    height: 22px !important;
+}
+
+
+body.dark-theme #chapters-grid > div {
+    border: 1px solid #C5A059 !important; 
+    background-color: #1e1e1e !important;
+}
+
+
+
+
+body.dark-theme #chapters-grid > div h4,
+body.dark-theme #chapters-grid > div span,
+body.dark-theme #chapters-grid > div i {
+    color: #ffffff !important;
+}
+body.dark-theme,
+body.dark-theme *,
+body.dark-theme [class*="border"] {
+    border-color: #eddbba !important;
+}
+
+body.dark-theme #chapters-grid > div,
+body.dark-theme #hadith-cards-container > div,
+body.dark-theme .search-filters-card,
+body.dark-theme .hadiths-nav-card,
+body.dark-theme input {
+    border: 1px solid #C5A059 !important;
+}
+body.dark-theme #screen-welcome .grid > div h4,
+body.dark-theme #screen-welcome .grid > div p{
+    color: #ffffffc4 !important;
+}
+body.dark-theme button:hover span,
+body.dark-theme button:hover i,
+body.dark-theme .back-btn:hover span,
+body.dark-theme .back-btn:hover i {
+    color: #C5A059 !important;
+}
+body.dark-theme .text-gray-500 {
+    color: #ffffffb2 !important;
+}
