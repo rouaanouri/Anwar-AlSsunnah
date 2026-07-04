@@ -62,12 +62,6 @@ function applyAndCloseFilters() {
     }
 }
 
-function countWordsInText(text) {
-    if (!text) return 0;
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
-}
-
-
 function applyMyCustomFilters() {
     const isArabic = (typeof currentLang !== 'undefined' && currentLang === 'ar');
     if (originalSearchResultsSnapshot.length === 0 && typeof globalFilteredResults !== 'undefined' && globalFilteredResults.length > 0) {
@@ -103,14 +97,10 @@ function applyMyCustomFilters() {
         if (chapterKeyword) {
             let chapterTitle = '';
             if (window.globalAllChapters) {
-                const currentChapter = window.globalAllChapters.find(c => c.id == (hadith.chapter_id ?? hadith.chapterId));
+                const currentChapter = window.globalAllChapters.find(c => c.id == getChapterId(hadith));
                 if (currentChapter) {
-                    if (isArabic) {
-                        const rawTitle = currentChapter.arabic || currentChapter.title_ar || currentChapter.name_ar || '';
-                        chapterTitle = typeof cleanArabicText === 'function' ? cleanArabicText(rawTitle) : rawTitle;
-                    } else {
-                        chapterTitle = currentChapter.english || currentChapter.title_en || currentChapter.name_en || '';
-                    }
+                    const rawTitle = getChapterTitle(currentChapter, isArabic ? 'ar' : 'en');
+                    chapterTitle = isArabic && typeof cleanArabicText === 'function' ? cleanArabicText(rawTitle) : rawTitle;
                 }
             }
             const keyword = isArabic ? (typeof cleanArabicText === 'function' ? cleanArabicText(chapterKeyword) : chapterKeyword) : chapterKeyword.toLowerCase();
@@ -119,10 +109,8 @@ function applyMyCustomFilters() {
             if (!targetTitle.includes(keyword)) return false;
         }
 
-        if (lengthType !== "all" && hadith.arabic) {
-            const wordCount = countWordsInText(hadith.arabic);
-            if (lengthType === "short" && wordCount >= 50) return false;
-            if (lengthType === "long" && wordCount < 50) return false;
+        if (hadith.arabic && !matchesLengthFilter(hadith.arabic, lengthType)) {
+            return false;
         }
 
         return true;
@@ -150,7 +138,7 @@ if (countLabel) {
 
 document.addEventListener("DOMContentLoaded", () => {
     try {
-        document.getElementById("filter-global-chapter")?.addEventListener("input", applyMyCustomFilters);
+        document.getElementById("filter-global-chapter")?.addEventListener("input", debounce(applyMyCustomFilters, 250));
         document.getElementById("filter-global-books")?.addEventListener("change", applyMyCustomFilters);
 
         ['all', 'short', 'long'].forEach(type => {
@@ -158,7 +146,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 setGlobalLengthFilter(type);
             });
         });
-      document.getElementById("global-search")?.addEventListener("input", (e) => {
+      document.getElementById("global-search")?.addEventListener("input", debounce((e) => {
     const searchVal = e.target.value.trim();
     const countLabel = document.getElementById('results-count-label');
 
@@ -172,7 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
         applyMyCustomFilters();
     }
-});
+}, 250));
     } catch (error) {
         console.error("خطأ أثناء تهيئة مستمعي الأحداث في ملف الفلترة:", error);
     }

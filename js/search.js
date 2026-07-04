@@ -31,7 +31,7 @@ function highlightText(text, query) {
     } catch (e) { return text; }
 }
 
-async function performGlobalSearch() {
+function performGlobalSearch() {
     const inputField = document.getElementById('global-search');
     const container = document.getElementById('hadiths-container'); 
     if (!inputField || !container) return;
@@ -51,6 +51,17 @@ async function performGlobalSearch() {
         return;
     }
 
+    debouncedPerformGlobalSearchCore();
+}
+
+async function performGlobalSearchCore() {
+    const inputField = document.getElementById('global-search');
+    const container = document.getElementById('hadiths-container'); 
+    if (!inputField || !container) return;
+
+    const rawQuery = inputField.value.trim();
+    if (rawQuery.length < 3) return; 
+
     const books = ['bukhari', 'muslim', 'tirmidhi', 'ibnmajah', 'nasai', 'abudawud'];
 
     if (window.globalAllHadiths.length === 0) {
@@ -66,9 +77,11 @@ async function performGlobalSearch() {
                 if (typeof currentBookKey !== 'undefined' && currentBookKey === book && typeof currentBookData !== 'undefined' && currentBookData) {
                     data = currentBookData;
                 } else {
-                    const response = await fetch(`data/${book}.json`);
-                    if (!response.ok) continue;
-                    data = await response.json();
+                    data = await getCachedBookJSON(book);
+                    if (!data) {
+                        data = await fetchJSONWithRetry(`data/${book}.json`);
+                        setCachedBookJSON(book, data);
+                    }
                 }
 
                 let bookTitleAr = '';
@@ -133,8 +146,8 @@ async function performGlobalSearch() {
 
             let chapterTitleArabic = '';
             if (window.globalAllChapters && window.globalAllChapters.length > 0) {
-                const currentChapter = window.globalAllChapters.find(c => c.id == (hadith.chapter_id ?? hadith.chapterId) && c.globalBookKey === hadith.globalBookKey);
-                if (currentChapter) chapterTitleArabic = cleanArabicText(currentChapter.arabic || currentChapter.title_ar || currentChapter.name_ar || '');
+                const currentChapter = window.globalAllChapters.find(c => c.id == getChapterId(hadith) && c.globalBookKey === hadith.globalBookKey);
+                if (currentChapter) chapterTitleArabic = cleanArabicText(getChapterTitle(currentChapter, 'ar'));
             }
 
             return textArabic.includes(searchQuery) ||
@@ -150,8 +163,8 @@ async function performGlobalSearch() {
 
             let chapterTitleEnglish = '';
             if (window.globalAllChapters && window.globalAllChapters.length > 0) {
-                const currentChapter = window.globalAllChapters.find(c => c.id == (hadith.chapter_id ?? hadith.chapterId) && c.globalBookKey === hadith.globalBookKey);
-                if (currentChapter) chapterTitleEnglish = (currentChapter.english || currentChapter.title_en || currentChapter.name_en || '').toLowerCase();
+                const currentChapter = window.globalAllChapters.find(c => c.id == getChapterId(hadith) && c.globalBookKey === hadith.globalBookKey);
+                if (currentChapter) chapterTitleEnglish = getChapterTitle(currentChapter, 'en').toLowerCase();
             }
 
             return textEnglish.includes(searchQuery) ||
@@ -165,6 +178,8 @@ async function performGlobalSearch() {
     displayGlobalPage(globalCurrentPage, rawQuery);
 }
 
+const debouncedPerformGlobalSearchCore = debounce(performGlobalSearchCore, 350);
+
 function displayGlobalPage(page, query) {
     const container = document.getElementById('hadiths-container');
     if (!container) return;
@@ -172,28 +187,10 @@ function displayGlobalPage(page, query) {
     container.innerHTML = '';
 
     if (globalFilteredResults.length === 0) {
-       if( currentLang === 'ar') {
-            container.innerHTML = `
-                <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
-                    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
-                        <i class="fa-solid fa-folder-open text-2xl"></i>
-                    </div>
-                    <h4 class="font-bold text-lg text-madinah-dark">لم نعثر على أي نتائج مطابقة</h4>
-                </div>
-            `;
-        } else {
-            container.innerHTML = `
-                <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
-                    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
-                        <i class="fa-solid fa-folder-open text-2xl"></i>
-                    </div>
-                    <h4 class="font-bold text-lg text-madinah-dark">No matching results found</h4>
-                </div>
-            `;
-        }
-        return;
+        const noResultsMsg = currentLang === 'ar' ? 'لم يتم العثور على نتائج تطابق بحثك.' : 'No results found matching your search.';
+        renderSimpleMessage(container, noResultsMsg);
         removeGlobalPagination();
-        
+        return;
     }
 
     const startIndex = (page - 1) * globalItemsPerPage;
@@ -205,11 +202,9 @@ function displayGlobalPage(page, query) {
     pageItems.forEach(hadith => {
         let chapterTitle = '';
         if (window.globalAllChapters && window.globalAllChapters.length > 0) {
-            const currentChapter = window.globalAllChapters.find(c => c.id == (hadith.chapter_id ?? hadith.chapterId) && c.globalBookKey === hadith.globalBookKey);
+            const currentChapter = window.globalAllChapters.find(c => c.id == getChapterId(hadith) && c.globalBookKey === hadith.globalBookKey);
             if (currentChapter) {
-                chapterTitle = currentLang === 'ar' ? 
-                    (currentChapter.arabic || currentChapter.title_ar || currentChapter.name_ar || currentChapter.name || '') : 
-                    (currentChapter.english || currentChapter.title_en || currentChapter.name_en || currentChapter.text_en || '');
+                chapterTitle = getChapterTitle(currentChapter, currentLang);
             }
         }
         if (!chapterTitle) chapterTitle = currentLang === 'ar' ? 'باب' : 'Chapter';
@@ -294,7 +289,7 @@ function removeGlobalPagination() {
     if (existingControls) existingControls.remove();
 }
 
-function filterAndSearch() {
+function filterAndSearchImpl() {
     const searchInput = document.getElementById('hadith-search');
     if (!searchInput) return;
     currentTextFilter = cleanArabicText(searchInput.value);
@@ -302,23 +297,20 @@ function filterAndSearch() {
         renderHadiths(selectedChapterId);
     }
 }
+const filterAndSearch = debounce(filterAndSearchImpl, 250);
 
 function findBookChapter(hadith) {
     if (!currentBookData || !currentBookData.chapters) return null;
-    const chapterId = hadith.chapter_id !== undefined ? hadith.chapter_id : (hadith.chapterId !== undefined ? hadith.chapterId : hadith.book_id);
-    return currentBookData.chapters.find(c => c.id == chapterId);
+    return currentBookData.chapters.find(c => c.id == getChapterId(hadith));
 }
 
 function getLocalHadithNumber(hadith) {
     if (!currentBookData || !Array.isArray(currentBookData.hadiths)) return hadith.num || hadith.id || '';
 
-    const chapterId = hadith.chapter_id !== undefined ? hadith.chapter_id : (hadith.chapterId !== undefined ? hadith.chapterId : hadith.book_id);
+    const chapterId = getChapterId(hadith);
 
     const siblings = currentBookData.hadiths
-        .filter(h => {
-            const hChapterId = h.chapter_id !== undefined ? h.chapter_id : (h.chapterId !== undefined ? h.chapterId : h.book_id);
-            return hChapterId == chapterId;
-        })
+        .filter(h => getChapterId(h) == chapterId)
         .sort((a, b) => (a.id || 0) - (b.id || 0));
 
     const idx = siblings.findIndex(h => h === hadith);
@@ -340,6 +332,18 @@ function performBookSearch() {
         return;
     }
 
+    debouncedPerformBookSearchCore();
+}
+
+function performBookSearchCore() {
+    const input = document.getElementById('book-search');
+    const resultsContainer = document.getElementById('book-search-results');
+    const chaptersGrid = document.getElementById('chapters-grid');
+    if (!input || !resultsContainer || !chaptersGrid) return;
+
+    const rawQuery = input.value.trim();
+    if (rawQuery === '') return; 
+
     if (!currentBookData || !currentBookData.hadiths) return;
 
     let matches = [];
@@ -349,7 +353,7 @@ function performBookSearch() {
         matches = currentBookData.hadiths.filter(h => {
             const text = cleanArabicText(h.arabic || '');
             const chapter = findBookChapter(h);
-            const chapterTitle = chapter ? cleanArabicText(chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '') : '';
+            const chapterTitle = chapter ? cleanArabicText(getChapterTitle(chapter, 'ar')) : '';
             return text.includes(query) || chapterTitle.includes(query);
         });
     } else {
@@ -358,7 +362,7 @@ function performBookSearch() {
             const text = getHadithText(h, 'en').toLowerCase();
             const narrator = getHadithNarrator(h, 'en').toLowerCase();
             const chapter = findBookChapter(h);
-            const chapterTitle = chapter ? (chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || '').toLowerCase() : '';
+            const chapterTitle = chapter ? getChapterTitle(chapter, 'en').toLowerCase() : '';
             return text.includes(query) || narrator.includes(query) || chapterTitle.includes(query);
         });
     }
@@ -368,29 +372,15 @@ function performBookSearch() {
     renderBookSearchResults(matches, rawQuery);
 }
 
+const debouncedPerformBookSearchCore = debounce(performBookSearchCore, 250);
+
 function renderBookSearchResults(matches, query) {
     const resultsContainer = document.getElementById('book-search-results');
     if (!resultsContainer) return;
 
     if (matches.length === 0) {
-        const noResultsMsg = currentLang === 'ar' ? 
-        `
-                <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
-                    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
-                        <i class="fa-solid fa-folder-open text-2xl"></i>
-                    </div>
-                    <h4 class="font-bold text-lg text-madinah-dark">لم نعثر على أي نتائج مطابقة</h4>
-                </div>
-            ` :
-             `
-                <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
-                    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
-                        <i class="fa-solid fa-folder-open text-2xl"></i>
-                    </div>
-                    <h4 class="font-bold text-lg text-madinah-dark">No matching results found</h4>
-                </div>
-            `;
-        resultsContainer.innerHTML = `<p class="text-center text-gray-500 py-8 font-medium">${noResultsMsg}</p>`;
+        const noResultsMsg = currentLang === 'ar' ? 'لم يتم العثور على نتائج مطابقة في هذا الكتاب.' : 'No matching results found in this book.';
+        renderSimpleMessage(resultsContainer, noResultsMsg);
         return;
     }
 
@@ -398,11 +388,9 @@ function renderBookSearchResults(matches, query) {
     const limitedMatches = matches.slice(0, MAX_RESULTS);
 
     let htmlString = limitedMatches.map(hadith => {
-        const chapterId = hadith.chapter_id !== undefined ? hadith.chapter_id : (hadith.chapterId !== undefined ? hadith.chapterId : hadith.book_id);
+        const chapterId = getChapterId(hadith);
         const chapter = findBookChapter(hadith);
-        let chapterTitle = chapter ? (currentLang === 'ar' ?
-            (chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '') :
-            (chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || '')) : '';
+        let chapterTitle = chapter ? getChapterTitle(chapter, currentLang) : '';
         if (!chapterTitle) chapterTitle = currentLang === 'ar' ? 'باب' : 'Chapter';
 
         let text = getHadithText(hadith, currentLang);
@@ -445,9 +433,7 @@ function renderBookSearchResults(matches, query) {
 function openBookChapterFromSearch(chapterId) {
     if (!currentBookData) return;
     const chapter = currentBookData.chapters.find(c => c.id == chapterId);
-    const chapterTitle = chapter ? (currentLang === 'ar' ?
-        (chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '') :
-        (chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || '')) : '';
+    const chapterTitle = chapter ? getChapterTitle(chapter, currentLang) : '';
 
     selectedChapterId = chapter ? chapter.id : chapterId;
 

@@ -6,6 +6,149 @@ let currentTextFilter = '';
 let currentLengthFilter = 'all';  
 let currentBookKey = '';   
 
+const SHORT_HADITH_WORD_LIMIT = 50;
+
+
+function getChapterId(hadith) {
+    if (!hadith) return undefined;
+    if (hadith.chapter_id !== undefined) return hadith.chapter_id;
+    if (hadith.chapterId !== undefined) return hadith.chapterId;
+    return hadith.book_id;
+}
+
+
+function getChapterTitle(chapter, lang) {
+    if (!chapter) return '';
+    if (lang === 'ar') {
+        return chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '';
+    }
+    return chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || chapter.title || '';
+}
+
+
+function countWordsInText(text) {
+    if (!text) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+}
+
+
+function matchesLengthFilter(text, lengthFilter) {
+    if (lengthFilter === 'all' || !lengthFilter) return true;
+    const wordCount = countWordsInText(text);
+    if (lengthFilter === 'short') return wordCount < SHORT_HADITH_WORD_LIMIT;
+    if (lengthFilter === 'long') return wordCount >= SHORT_HADITH_WORD_LIMIT;
+    return true;
+}
+
+
+function renderSimpleMessage(container, message) {
+    if (!container) return;
+    container.innerHTML = `<p class="text-center text-gray-500 py-8 font-medium">${message}</p>`;
+}
+
+function renderEmptyState(container, message) {
+    if (!container) return;
+    container.innerHTML = `
+        <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
+            <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
+                <i class="fa-solid fa-folder-open text-2xl"></i>
+            </div>
+            <h4 class="font-bold text-lg text-madinah-dark">${message}</h4>
+        </div>
+    `;
+}
+
+
+function debounce(fn, delay = 300) {
+    let timerId = null;
+    return function debounced(...args) {
+        clearTimeout(timerId);
+        timerId = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+
+const BOOK_DB_NAME = 'hadithBooksCache';
+const BOOK_DB_VERSION = 1;
+const BOOK_STORE_NAME = 'books';
+
+let bookCacheDBPromise = null;
+
+function openBookCacheDB() {
+    if (bookCacheDBPromise) return bookCacheDBPromise;
+
+    bookCacheDBPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) {
+            reject(new Error('IndexedDB غير مدعومة '));
+            return;
+        }
+        const request = indexedDB.open(BOOK_DB_NAME, BOOK_DB_VERSION);
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(BOOK_STORE_NAME)) {
+                db.createObjectStore(BOOK_STORE_NAME, { keyPath: 'bookKey' });
+            }
+        };
+        request.onsuccess = (event) => resolve(event.target.result);
+        request.onerror = (event) => reject(event.target.error);
+    });
+
+    return bookCacheDBPromise;
+}
+
+async function getCachedBookJSON(bookKey) {
+    try {
+        const db = await openBookCacheDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(BOOK_STORE_NAME, 'readonly');
+            const store = tx.objectStore(BOOK_STORE_NAME);
+            const request = store.get(bookKey);
+            request.onsuccess = () => resolve(request.result ? request.result.data : null);
+            request.onerror = () => reject(request.error);
+        });
+    } catch (e) {
+        console.warn('تعذر قراءة  الكتاب من IndexedDB:', bookKey, e);
+        return null;
+    }
+}
+
+async function setCachedBookJSON(bookKey, data) {
+    try {
+        const db = await openBookCacheDB();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(BOOK_STORE_NAME, 'readwrite');
+            const store = tx.objectStore(BOOK_STORE_NAME);
+            const request = store.put({ bookKey, data, cachedAt: Date.now() });
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    } catch (e) {
+        console.warn('تعذر حفظ  الكتاب بـ IndexedDB:', bookKey, e);
+    }
+}
+
+async function fetchJSONWithRetry(url, { retries = 2, timeoutMs = 12000 } = {}) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+        } catch (err) {
+            clearTimeout(timeoutId);
+            lastError = err;
+            if (attempt < retries) {
+                await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
+            }
+        }
+    }
+    throw lastError;
+}
+
 const translations = {
     ar: {
         pageTitle: "منصة أنوار السنة - الصحاح الستة",
@@ -215,9 +358,7 @@ function toggleLanguage() {
         
         const chapter = currentBookData.chapters.find(c => c.id == selectedChapterId);
         if (chapter) {
-            const translatedChapterTitle = currentLang === 'ar' ? 
-                (chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '') : 
-                (chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || '');
+            const translatedChapterTitle = getChapterTitle(chapter, currentLang);
                 
             const chapterSpan = document.getElementById('breadcrumb-chapter');
             const hadithScreenChapter = document.getElementById('hadith-screen-chapter');
@@ -225,6 +366,11 @@ function toggleLanguage() {
             if (chapterSpan) chapterSpan.innerText = translatedChapterTitle;
             if (hadithScreenChapter) hadithScreenChapter.innerText = translatedChapterTitle;
         }
+    }
+
+    const backToTopTooltip = document.getElementById('back-to-top-tooltip');
+    if (backToTopTooltip) {
+        backToTopTooltip.innerText = currentLang === 'ar' ? 'العودة للأعلى' : 'Back to Top';
     }
 }
 
@@ -258,10 +404,10 @@ function toggleLanguage() {
             else element.innerHTML = t[key];
         }
     });
-    const allHadithsBtn = document.getElementById('all-hadiths-btn');
-    if (allHadithsBtn) {
-        allHadithsBtn.innerText = currentLang === 'ar' ? 'كل الأحاديث' : 'All Hadiths';
-    }
+const allHadithsBtn = document.getElementById('all-hadiths-btn');
+if (allHadithsBtn) {
+    allHadithsBtn.innerText = currentLang === 'ar' ? 'كل الأحاديث' : 'All Hadiths';
+}
 }
 function showScreen(screenId) {
     activeScreen = screenId;
@@ -290,8 +436,7 @@ function showScreen(screenId) {
         if (bookSpan) bookSpan.innerText = "";
         if (chapterSpan) chapterSpan.innerText = "";
         if (divider) divider.classList.add('hidden');
-    } 
-    else {
+    } else {
 
         if (breadcrumbs) breadcrumbs.classList.remove('hidden');
         
@@ -304,7 +449,7 @@ function showScreen(screenId) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function selectBook(bookKey) {
+async function selectBook(bookKey) {
     currentBookKey = bookKey;
     
     const bookTitleText = translations[currentLang][`${bookKey}Title` || ''];
@@ -323,32 +468,67 @@ function selectBook(bookKey) {
         breadcrumbBook.classList.remove('hidden');
     }
 
-    let jsonFile = `data/${bookKey}.json`;      
-    fetch(jsonFile)
-        .then(response => {
-            if (!response.ok) throw new Error(`Could not fetch ${jsonFile}`);
-            return response.json();
-        })
-        .then(data => {
-            currentBookData = data;
-            selectedChapterId = null; 
-            
-            console.log(currentBookData);
-            const bookSearchInput = document.getElementById('book-search');
-            const bookSearchResults = document.getElementById('book-search-results');
-            if (bookSearchInput) bookSearchInput.value = '';
-            if (bookSearchResults) { bookSearchResults.classList.add('hidden'); bookSearchResults.innerHTML = ''; }
-            updateStaticUI();
+    const jsonFile = `data/${bookKey}.json`;
 
-            renderChapters(currentBookData.chapters);
-            showScreen('chapters');
+    const applyBookData = (data) => {
+        currentBookData = data;
+        selectedChapterId = null; 
+        
+        const bookSearchInput = document.getElementById('book-search');
+        const bookSearchResults = document.getElementById('book-search-results');
+        if (bookSearchInput) bookSearchInput.value = '';
+        if (bookSearchResults) { bookSearchResults.classList.add('hidden'); bookSearchResults.innerHTML = ''; }
+        updateStaticUI();
+
+        renderChapters(currentBookData.chapters);
+        showScreen('chapters');
+    };
+
+    const cachedData = await getCachedBookJSON(bookKey);
+    if (cachedData) {
+        applyBookData(cachedData);
+        fetchJSONWithRetry(jsonFile, { retries: 1 })
+            .then(freshData => setCachedBookJSON(bookKey, freshData))
+            .catch(() => {});
+        return;
+    }
+
+    const chaptersGrid = document.getElementById('chapters-grid');
+    showScreen('chapters');
+    if (chaptersGrid) {
+        const loadingMsg = currentLang === 'ar' ? 'جاري تحميل الكتاب...' : 'Loading book...';
+        chaptersGrid.innerHTML = `
+            <div class="col-span-full flex flex-col items-center justify-center gap-3 py-12 text-madinah-dark">
+                <i class="fa-solid fa-spinner fa-spin text-2xl text-madinah-gold"></i>
+                <p class="text-sm font-medium">${loadingMsg}</p>
+            </div>
+        `;
+    }
+
+    fetchJSONWithRetry(jsonFile)
+        .then(data => {
+            setCachedBookJSON(bookKey, data);
+            applyBookData(data);
         })
         .catch(error => {
             console.error(`Error fetching ${bookKey} data:`, error);
-            alert(currentLang === 'ar' ? `فشل تحميل ملف الكتاب.` : `Failed to load file.`);
+            if (chaptersGrid) {
+                const failMsg = currentLang === 'ar' 
+                    ? 'فشل تحميل الكتاب. تأكد من اتصال الإنترنت وحاول مرة أخرى.' 
+                    : 'Failed to load the book. Check your internet connection and try again.';
+                const retryLabel = currentLang === 'ar' ? 'إعادة المحاولة' : 'Retry';
+                chaptersGrid.innerHTML = `
+                    <div class="col-span-full flex flex-col items-center justify-center gap-3 py-12 text-center">
+                        <i class="fa-solid fa-triangle-exclamation text-2xl text-red-400"></i>
+                        <p class="text-sm font-medium text-madinah-dark">${failMsg}</p>
+                        <button onclick="selectBook('${bookKey}')" class="mt-2 px-5 py-2 bg-madinah-green text-white rounded-lg text-sm font-bold hover:opacity-90 transition">
+                            ${retryLabel}
+                        </button>
+                    </div>
+                `;
+            }
         });
 }
-
 function renderChapters(chapters) {
     const chaptersGrid = document.getElementById('chapters-grid');
     if (!chaptersGrid) return;
@@ -366,7 +546,7 @@ function renderChapters(chapters) {
         const badgeDirectionClass = isAr ? "flex-row" : "flex-row-reverse";
         const arrowIcon = isAr ? "fa-chevron-left" : "fa-chevron-right";
 
-        chapCard.className = `bg-white rounded-xl border border-gray-100 p-5 hover:border-madinah-gold hover:shadow-md transition-all duration-300 cursor-pointer flex justify-between items-center group ${cardDirectionClass}`;
+    chapCard.className = `bg-white rounded-xl border border-gray-100 p-5 hover:border-madinah-gold hover:shadow-md transition-all duration-300 cursor-pointer flex justify-between items-center group ${cardDirectionClass}`;
         chapCard.onclick = () => {
             selectedChapterId = chapter.id;
             
@@ -374,9 +554,7 @@ function renderChapters(chapters) {
             const breadcrumbChapter = document.getElementById('breadcrumb-chapter');
             const hadithScreenChapter = document.getElementById('hadith-screen-chapter');
             
-            const chapterTitle = isAr ? 
-                (chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '') :
-                (chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || '');
+            const chapterTitle = getChapterTitle(chapter, currentLang);
                 
             if (breadcrumbDivider) breadcrumbDivider.classList.remove('hidden');
             if (breadcrumbChapter) breadcrumbChapter.innerText = chapterTitle;
@@ -392,19 +570,14 @@ function renderChapters(chapters) {
             showScreen('hadiths');
         };
         
-        const chapterTitle = isAr ? 
-            (chapter.arabic || chapter.title_ar || chapter.name_ar || chapter.name || '') :
-            (chapter.english || chapter.title_en || chapter.name_en || chapter.text_en || chapter.title || '');
+        const chapterTitle = getChapterTitle(chapter, currentLang);
             
         const chapterLabel = isAr ? `الباب ${idx + 1}` : `Chapter ${idx + 1}`;
         
         let finalCount = 0;
         try {
             if (currentBookData && Array.isArray(currentBookData.hadiths)) {
-                finalCount = currentBookData.hadiths.filter(h => {
-                    const hChapterId = h.chapter_id !== undefined ? h.chapter_id : (h.chapterId !== undefined ? h.chapterId : h.book_id);
-                    return hChapterId == chapter.id;
-                }).length;
+                finalCount = currentBookData.hadiths.filter(h => getChapterId(h) == chapter.id).length;
             }
         } catch (e) {
             console.warn("حدث خطأ  أثناء حساب الأعداد وتم تجاوزه بأمان:", e);
@@ -461,10 +634,7 @@ function renderHadiths(chapterId) {
     container.innerHTML = '';
     if (!currentBookData || !currentBookData.hadiths) return;
     
-    let hadithList = currentBookData.hadiths.filter(h => {
-        const hChapterId = h.chapter_id !== undefined ? h.chapter_id : (h.chapterId !== undefined ? h.chapterId : h.book_id);
-        return hChapterId == chapterId; 
-    });
+    let hadithList = currentBookData.hadiths.filter(h => getChapterId(h) == chapterId);
 
     hadithList.sort((a, b) => (a.id || 0) - (b.id || 0));
     const chapterHadithNumbers = new Map();
@@ -481,19 +651,7 @@ function renderHadiths(chapterId) {
         });
     }
         
-    if (currentLengthFilter === 'short') {
-        hadithList = hadithList.filter(h => {
-            const text = getHadithText(h, currentLang).trim();
-            const wordCount = text ? text.split(/\s+/).length : 0;
-            return wordCount < 50;
-        });
-    } else if (currentLengthFilter === 'long') {
-        hadithList = hadithList.filter(h => {
-            const text = getHadithText(h, currentLang).trim();
-            const wordCount = text ? text.split(/\s+/).length : 0;
-            return wordCount >= 50;
-        });
-    }
+    hadithList = hadithList.filter(h => matchesLengthFilter(getHadithText(h, currentLang), currentLengthFilter));
     
     if (countBadge) {
         if (currentLang === 'ar') {
@@ -504,25 +662,8 @@ function renderHadiths(chapterId) {
     }
     
     if (hadithList.length === 0) {
-        if (currentLang === 'ar') {
-            container.innerHTML = `
-                <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
-                    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
-                        <i class="fa-solid fa-folder-open text-2xl"></i>
-                    </div>
-                    <h4 class="font-bold text-lg text-madinah-dark">لم نعثر على أي نتائج مطابقة</h4>
-                </div>
-            `;
-        } else {
-            container.innerHTML = `
-                <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center space-y-4 w-full">
-                    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-madinah-gold">
-                        <i class="fa-solid fa-folder-open text-2xl"></i>
-                    </div>
-                    <h4 class="font-bold text-lg text-madinah-dark">No matching results found</h4>
-                </div>
-            `;
-        }
+        const noResultsMsg = currentLang === 'ar' ? 'لم نعثر على أي نتائج مطابقة' : 'No matching results found';
+        renderEmptyState(container, noResultsMsg);
         return;
     }
     
@@ -551,7 +692,7 @@ function renderHadiths(chapterId) {
             <p class="text-xl leading-relaxed text-madinah-dark ${alignClass}">${text}</p> `;
 
         if (narrator && currentLang !== 'ar') {
-         cardHTML += `
+    cardHTML += `
         <div class="pt-4 border-t border-gray-100 text-xs text-gray-500 flex items-center gap-1.5">
             <i class="fa-solid fa-user text-madinah-gold"></i> 
             <span><strong>Narrator:</strong> ${narrator}</span>
@@ -665,35 +806,6 @@ function initBackToTopButton() {
         });
     });
 }
-
-const originalDOMContentLoaded = document.addEventListener;
-document.addEventListener('DOMContentLoaded', function(e) {
-    
-    const handlers = [];
-    document.addEventListener = function(type, handler) {
-        if (type === 'DOMContentLoaded') {
-            handlers.push(handler);
-        } else {
-            originalDOMContentLoaded.call(document, type, handler);
-        }
-    };
-    
-    
-    setTimeout(() => {
-        handlers.forEach(handler => handler(e));
-    }, 0);
-});
-
-
-const originalToggleLanguage = toggleLanguage;
-toggleLanguage = function() {
-    originalToggleLanguage();
-    const tooltip = document.getElementById('back-to-top-tooltip');
-    if (tooltip) {
-        tooltip.innerText = currentLang === 'ar' ? 'العودة للأعلى' : 'Back to Top';
-    }
-};
-
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initBackToTopButton);
